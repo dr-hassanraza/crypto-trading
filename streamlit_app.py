@@ -18,8 +18,10 @@ try:
     from src.risk.advanced_risk_models import risk_models
     ml_modules_available = True
 except ImportError as e:
-    st.warning(f"Some ML modules not available in Streamlit Cloud: {e}")
+    # Running on Streamlit Cloud - use mock data instead
     ml_modules_available = False
+    import warnings
+    warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
