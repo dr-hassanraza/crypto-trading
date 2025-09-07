@@ -118,11 +118,53 @@ st.markdown("""
 st.sidebar.title("🔧 Dashboard Controls")
 st.sidebar.markdown("---")
 
-# Navigation
+# Navigation with auto-scroll to top
 page = st.sidebar.selectbox(
     "Select Dashboard",
     ["📊 Overview", "🤖 AI Predictions", "💹 Trading Analytics", "⚠️ Risk Management", "🏛️ DeFi Analysis", "🐋 Whale Tracker"]
 )
+
+# Auto-scroll to top when page changes  
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = page
+
+# Check if page has changed and add scroll-to-top functionality
+page_changed = st.session_state.current_page != page
+if page_changed:
+    st.session_state.current_page = page
+
+# Add a scroll-to-top anchor and JavaScript
+st.markdown('<div id="page-top"></div>', unsafe_allow_html=True)
+
+if page_changed:
+    st.markdown(
+        """
+        <script>
+        setTimeout(function() {
+            try {
+                // Scroll to top using multiple methods for reliability
+                const topElement = document.getElementById('page-top');
+                if (topElement) {
+                    topElement.scrollIntoView({behavior: 'smooth'});
+                }
+                
+                // Backup methods
+                const mainElement = window.parent.document.querySelector('section.main');
+                if (mainElement) {
+                    mainElement.scrollTop = 0;
+                }
+                
+                window.parent.scrollTo({top: 0, behavior: 'smooth'});
+                
+            } catch(e) {
+                // Final fallback
+                window.scrollTo(0, 0);
+            }
+        }, 200);
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
 # Auto-refresh option
 auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=True)
