@@ -17,7 +17,6 @@ try:
     )
     api_available = True
     api_mode = "multi"
-    st.success("🚀 **Multi-API Mode** - 5 backup APIs available!")
 except ImportError:
     # Fallback to simplified API
     try:
@@ -30,7 +29,6 @@ except ImportError:
         )
         api_available = True
         api_mode = "simple"
-        st.info("🟢 **Simplified API Mode** - Single API with caching")
     except ImportError:
         # Final fallback to full API
         try:
@@ -44,9 +42,7 @@ except ImportError:
             )
             api_available = True
             api_mode = "full"
-            st.warning("🟡 **Full API Mode** - May encounter rate limits")
         except ImportError as e:
-            st.error(f"❌ No API integrations available: {e}")
             api_available = False
             api_mode = "none"
 
