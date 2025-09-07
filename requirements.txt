@@ -4,8 +4,7 @@ plotly>=5.17.0
 pandas>=2.0.0
 numpy>=1.24.0
 
-# Optional dependencies for enhanced features
-# (These will be imported with try/except in the app)
+# API Dependencies for real cryptocurrency data
 requests>=2.31.0
 python-dotenv>=1.0.0
 
@@ -31,7 +30,7 @@ scipy>=1.11.0
 # - stable-baselines3 (RL)
 # - hmmlearn, statsmodels (advanced analytics)
 
-# These can be added back if needed for specific features:
-# scikit-learn>=1.3.0
-# yfinance>=0.2.22
+# Optional: Enhanced features (can be enabled if needed)
+yfinance>=0.2.18
+# scikit-learn>=1.3.0  
 # textblob>=0.17.1

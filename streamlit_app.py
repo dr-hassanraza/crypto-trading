@@ -8,6 +8,21 @@ import asyncio
 import json
 from typing import Dict, List, Any
 
+# Import API integrations for real data
+try:
+    from api_integrations import (
+        get_real_time_prices,
+        get_historical_price_data, 
+        get_defi_yield_data,
+        get_market_overview,
+        get_trending_cryptocurrencies,
+        get_whale_activity
+    )
+    api_available = True
+except ImportError as e:
+    st.warning(f"API integrations not available: {e}")
+    api_available = False
+
 # Import our modules (with error handling for Streamlit deployment)
 try:
     from src.ml_models.price_prediction import ml_predictor
@@ -18,7 +33,7 @@ try:
     from src.risk.advanced_risk_models import risk_models
     ml_modules_available = True
 except ImportError as e:
-    # Running on Streamlit Cloud - use mock data instead
+    # Running on Streamlit Cloud - use API data instead
     ml_modules_available = False
     import warnings
     warnings.filterwarnings('ignore')
@@ -93,8 +108,19 @@ if auto_refresh:
     st.sidebar.info(f"Data refreshes every {refresh_interval} seconds")
 
 # Mock data generation functions
-def generate_mock_price_data(symbol: str, days: int = 30) -> pd.DataFrame:
-    """Generate realistic mock price data."""
+def get_price_data(symbol: str, days: int = 30) -> pd.DataFrame:
+    """Get real or fallback price data."""
+    if api_available:
+        try:
+            return get_historical_price_data(symbol, days)
+        except Exception as e:
+            st.warning(f"API error for {symbol}: {str(e)}")
+    
+    # Fallback to mock data
+    return generate_fallback_price_data(symbol, days)
+
+def generate_fallback_price_data(symbol: str, days: int = 30) -> pd.DataFrame:
+    """Generate realistic fallback price data when API fails."""
     dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
     base_price = {'BTC': 45000, 'ETH': 2500, 'ADA': 0.5, 'SOL': 100}.get(symbol, 100)
     
@@ -183,73 +209,184 @@ def get_mock_arbitrage_opportunities():
 if page == "📊 Overview":
     st.header("Market Overview")
     
-    # Key metrics
+    # Key metrics with real market data
     col1, col2, col3, col4 = st.columns(4)
     
-    with col1:
-        portfolio_value = 300000 + np.random.normal(0, 10000)
-        st.metric("Portfolio Value", f"${portfolio_value:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+    if api_available:
+        try:
+            market_data = get_market_overview()
+            
+            with col1:
+                market_cap = market_data.get('total_market_cap', 2000000000000)
+                st.metric("Total Market Cap", f"${market_cap/1e12:.1f}T", "💰")
+            
+            with col2:
+                volume_24h = market_data.get('total_volume', 50000000000)
+                st.metric("24h Volume", f"${volume_24h/1e9:.1f}B", "📊")
+            
+            with col3:
+                fear_greed = market_data.get('fear_greed_index', 50)
+                classification = market_data.get('fear_greed_classification', 'Neutral')
+                st.metric("Fear & Greed Index", f"{fear_greed}/100", f"😨 {classification}")
+            
+            with col4:
+                btc_dominance = market_data.get('btc_dominance', 45)
+                st.metric("BTC Dominance", f"{btc_dominance:.1f}%", "₿")
+                
+        except Exception as e:
+            st.warning(f"Error loading market data: {str(e)}")
+            # Fallback metrics
+            with col1:
+                portfolio_value = 300000 + np.random.normal(0, 10000)
+                st.metric("Portfolio Value", f"${portfolio_value:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+            
+            with col2:
+                daily_pnl = np.random.normal(500, 2000)
+                st.metric("Daily P&L", f"${daily_pnl:,.0f}", f"{np.random.uniform(-3, 3):.2f}%")
+            
+            with col3:
+                sentiment_score = np.random.uniform(30, 85)
+                st.metric("Market Sentiment", f"{sentiment_score:.1f}/100", "↑ Bullish")
+            
+            with col4:
+                active_alerts = np.random.randint(0, 8)
+                st.metric("Active Alerts", f"{active_alerts}", "🔔")
+    else:
+        # Fallback to mock data
+        with col1:
+            portfolio_value = 300000 + np.random.normal(0, 10000)
+            st.metric("Portfolio Value", f"${portfolio_value:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+        
+        with col2:
+            daily_pnl = np.random.normal(500, 2000)
+            st.metric("Daily P&L", f"${daily_pnl:,.0f}", f"{np.random.uniform(-3, 3):.2f}%")
+        
+        with col3:
+            sentiment_score = np.random.uniform(30, 85)
+            st.metric("Market Sentiment", f"{sentiment_score:.1f}/100", "↑ Bullish")
+        
+        with col4:
+            active_alerts = np.random.randint(0, 8)
+            st.metric("Active Alerts", f"{active_alerts}", "🔔")
     
-    with col2:
-        daily_pnl = np.random.normal(500, 2000)
-        st.metric("Daily P&L", f"${daily_pnl:,.0f}", f"{np.random.uniform(-3, 3):.2f}%")
-    
-    with col3:
-        sentiment_score = np.random.uniform(30, 85)
-        st.metric("Market Sentiment", f"{sentiment_score:.1f}/100", "↑ Bullish")
-    
-    with col4:
-        active_alerts = np.random.randint(0, 8)
-        st.metric("Active Alerts", f"{active_alerts}", "🔔")
-    
-    # Price charts
+    # Price charts with real data
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("BTC/USD Price Chart")
-        btc_data = generate_mock_price_data('BTC', 30)
-        fig = go.Figure(data=go.Candlestick(
-            x=btc_data['Date'],
-            open=btc_data['Open'],
-            high=btc_data['High'],
-            low=btc_data['Low'],
-            close=btc_data['Close']
-        ))
-        fig.update_layout(height=400, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.spinner("Loading BTC data..."):
+            btc_data = get_price_data('BTC', 30)
+            fig = go.Figure(data=go.Candlestick(
+                x=btc_data['Date'],
+                open=btc_data['Open'],
+                high=btc_data['High'],
+                low=btc_data['Low'],
+                close=btc_data['Close']
+            ))
+            fig.update_layout(height=400, xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.subheader("ETH/USD Price Chart")
-        eth_data = generate_mock_price_data('ETH', 30)
-        fig = go.Figure(data=go.Candlestick(
-            x=eth_data['Date'],
-            open=eth_data['Open'],
-            high=eth_data['High'],
-            low=eth_data['Low'],
-            close=eth_data['Close']
-        ))
-        fig.update_layout(height=400, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+        with st.spinner("Loading ETH data..."):
+            eth_data = get_price_data('ETH', 30)
+            fig = go.Figure(data=go.Candlestick(
+                x=eth_data['Date'],
+                open=eth_data['Open'],
+                high=eth_data['High'],
+                low=eth_data['Low'],
+                close=eth_data['Close']
+            ))
+            fig.update_layout(height=400, xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
     
-    # Current prices
+    # Current prices with real data
     st.subheader("Live Market Data")
-    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
     
-    with price_col1:
-        btc_price = 45000 + np.random.normal(0, 1000)
-        st.metric("BTC", f"${btc_price:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+    if api_available:
+        with st.spinner("Loading live prices..."):
+            try:
+                prices = get_real_time_prices()
+                price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+                
+                with price_col1:
+                    btc_data = prices.get('BTC', {'price': 45000, 'change_24h': 0})
+                    change_color = "🟢" if btc_data['change_24h'] >= 0 else "🔴"
+                    st.metric("BTC", f"${btc_data['price']:,.0f}", f"{change_color} {btc_data['change_24h']:.2f}%")
+                
+                with price_col2:
+                    eth_data = prices.get('ETH', {'price': 2500, 'change_24h': 0})
+                    change_color = "🟢" if eth_data['change_24h'] >= 0 else "🔴"
+                    st.metric("ETH", f"${eth_data['price']:,.0f}", f"{change_color} {eth_data['change_24h']:.2f}%")
+                
+                with price_col3:
+                    ada_data = prices.get('ADA', {'price': 0.5, 'change_24h': 0})
+                    change_color = "🟢" if ada_data['change_24h'] >= 0 else "🔴"
+                    st.metric("ADA", f"${ada_data['price']:.4f}", f"{change_color} {ada_data['change_24h']:.2f}%")
+                
+                with price_col4:
+                    sol_data = prices.get('SOL', {'price': 100, 'change_24h': 0})
+                    change_color = "🟢" if sol_data['change_24h'] >= 0 else "🔴"
+                    st.metric("SOL", f"${sol_data['price']:.2f}", f"{change_color} {sol_data['change_24h']:.2f}%")
+                    
+            except Exception as e:
+                st.error(f"Error loading live prices: {str(e)}")
+                # Fallback to mock data
+                price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+                with price_col1:
+                    st.metric("BTC", "$45,000", "📊 API Error")
+    else:
+        # Fallback to mock data
+        price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+        
+        with price_col1:
+            btc_price = 45000 + np.random.normal(0, 1000)
+            st.metric("BTC", f"${btc_price:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+        
+        with price_col2:
+            eth_price = 2500 + np.random.normal(0, 100)
+            st.metric("ETH", f"${eth_price:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
+        
+        with price_col3:
+            ada_price = 0.5 + np.random.normal(0, 0.05)
+            st.metric("ADA", f"${ada_price:.4f}", f"{np.random.uniform(-5, 5):.2f}%")
+        
+        with price_col4:
+            sol_price = 100 + np.random.normal(0, 10)
+            st.metric("SOL", f"${sol_price:.2f}", f"{np.random.uniform(-5, 5):.2f}%")
     
-    with price_col2:
-        eth_price = 2500 + np.random.normal(0, 100)
-        st.metric("ETH", f"${eth_price:,.0f}", f"{np.random.uniform(-5, 5):.2f}%")
-    
-    with price_col3:
-        ada_price = 0.5 + np.random.normal(0, 0.05)
-        st.metric("ADA", f"${ada_price:.4f}", f"{np.random.uniform(-5, 5):.2f}%")
-    
-    with price_col4:
-        sol_price = 100 + np.random.normal(0, 10)
-        st.metric("SOL", f"${sol_price:.2f}", f"{np.random.uniform(-5, 5):.2f}%")
+    # Trending Coins Section
+    st.subheader("🔥 Trending Cryptocurrencies")
+    if api_available:
+        try:
+            trending = get_trending_cryptocurrencies()
+            if trending:
+                trending_col1, trending_col2 = st.columns(2)
+                
+                with trending_col1:
+                    st.write("**Top 5 Trending Coins:**")
+                    for i, coin in enumerate(trending[:5]):
+                        st.write(f"{i+1}. **{coin['name']}** ({coin['symbol']}) - Rank #{coin['market_cap_rank']}")
+                
+                with trending_col2:
+                    # Create a simple chart of trending coins
+                    trending_names = [coin['name'][:10] for coin in trending[:8]]
+                    trending_ranks = [coin['market_cap_rank'] for coin in trending[:8]]
+                    
+                    fig = go.Figure(data=go.Bar(x=trending_names, y=trending_ranks))
+                    fig.update_layout(
+                        title="Trending Coins Market Cap Rank", 
+                        height=250,
+                        yaxis_title="Market Cap Rank"
+                    )
+                    fig.update_yaxis(autorange="reversed")  # Lower rank = higher on chart
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No trending data available at the moment")
+        except Exception as e:
+            st.warning(f"Error loading trending data: {str(e)}")
+    else:
+        st.info("Enable API integration to see trending cryptocurrencies")
 
 elif page == "🤖 AI Predictions":
     st.header("AI Price Predictions")
@@ -379,18 +516,48 @@ elif page == "⚠️ Risk Management":
 elif page == "🏛️ DeFi Analysis":
     st.header("DeFi Yield Analysis")
     
-    # DeFi yields
-    defi_data = {
-        'Protocol': ['Compound', 'Aave', 'Yearn Finance', 'Curve', 'Uniswap V3'],
-        'Asset': ['USDC', 'ETH', 'DAI', 'USDT', 'ETH-USDC'],
-        'APY %': np.random.uniform(3, 25, 5),
-        'TVL ($M)': np.random.uniform(100, 2000, 5),
-        'Risk Level': np.random.choice(['Low', 'Medium', 'High'], 5)
-    }
-    
-    defi_df = pd.DataFrame(defi_data)
-    defi_df['APY %'] = defi_df['APY %'].round(2)
-    defi_df['TVL ($M)'] = defi_df['TVL ($M)'].round(0)
+    # Real DeFi data
+    if api_available:
+        with st.spinner("Loading DeFi protocol data..."):
+            try:
+                protocols = get_defi_yield_data()
+                
+                if protocols:
+                    defi_data = {
+                        'Protocol': [p['name'] for p in protocols],
+                        'Symbol': [p['symbol'] for p in protocols],
+                        'Price ($)': [round(p['price'], 2) for p in protocols],
+                        'Market Cap ($M)': [round(p['market_cap'] / 1e6, 1) for p in protocols],
+                        'Volume 24h ($M)': [round(p['volume_24h'] / 1e6, 1) for p in protocols],
+                        'APY Estimate %': [round(p['apy_estimate'], 2) for p in protocols],
+                        'TVL Estimate ($B)': [round(p['tvl_estimate'] / 1e9, 2) for p in protocols]
+                    }
+                    
+                    defi_df = pd.DataFrame(defi_data)
+                else:
+                    raise Exception("No DeFi data available")
+                    
+            except Exception as e:
+                st.warning(f"Error loading DeFi data: {str(e)} - Using fallback data")
+                # Fallback data
+                defi_data = {
+                    'Protocol': ['Compound', 'Aave', 'Yearn Finance', 'Curve', 'Uniswap V3'],
+                    'Symbol': ['COMP', 'AAVE', 'YFI', 'CRV', 'UNI'],
+                    'APY Estimate %': np.random.uniform(3, 25, 5).round(2),
+                    'TVL Estimate ($B)': np.random.uniform(0.5, 15, 5).round(2),
+                    'Risk Level': np.random.choice(['Low', 'Medium', 'High'], 5)
+                }
+                defi_df = pd.DataFrame(defi_data)
+    else:
+        # Fallback to mock data
+        defi_data = {
+            'Protocol': ['Compound', 'Aave', 'Yearn Finance', 'Curve', 'Uniswap V3'],
+            'Symbol': ['COMP', 'AAVE', 'YFI', 'CRV', 'UNI'],
+            'APY Estimate %': np.random.uniform(3, 25, 5).round(2),
+            'TVL Estimate ($B)': np.random.uniform(0.5, 15, 5).round(2),
+            'Risk Level': np.random.choice(['Low', 'Medium', 'High'], 5)
+        }
+        defi_df = pd.DataFrame(defi_data)
     
     st.dataframe(
         defi_df,
@@ -427,18 +594,52 @@ elif page == "🏛️ DeFi Analysis":
 elif page == "🐋 Whale Tracker":
     st.header("Whale Activity Tracker")
     
-    # Large transactions
-    whale_data = {
-        'Timestamp': [datetime.now() - timedelta(hours=i) for i in range(10)],
-        'Symbol': np.random.choice(['BTC', 'ETH', 'ADA'], 10),
-        'Amount': np.random.uniform(1000000, 50000000, 10),
-        'From Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
-        'To Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
-        'Type': np.random.choice(['Deposit', 'Withdrawal', 'Transfer'], 10)
-    }
-    
-    whale_df = pd.DataFrame(whale_data)
-    whale_df['Amount'] = whale_df['Amount'].round(0)
+    # Real whale data
+    if api_available:
+        with st.spinner("Loading whale activity data..."):
+            try:
+                whale_transactions = get_whale_activity()
+                
+                if whale_transactions:
+                    whale_data = {
+                        'Timestamp': [t['timestamp'] for t in whale_transactions],
+                        'Coin': [t['coin'] for t in whale_transactions],
+                        'Amount': [f"{t['amount']:,.4f}" for t in whale_transactions],
+                        'USD Value': [f"${t['usd_value']:,.0f}" for t in whale_transactions],
+                        'From': [t['from_address'] for t in whale_transactions],
+                        'To': [t['to_address'] for t in whale_transactions],
+                        'Type': [t['transaction_type'] for t in whale_transactions]
+                    }
+                    
+                    whale_df = pd.DataFrame(whale_data)
+                else:
+                    raise Exception("No whale data available")
+                    
+            except Exception as e:
+                st.warning(f"Error loading whale data: {str(e)} - Using simulated data")
+                # Fallback data
+                whale_data = {
+                    'Timestamp': [datetime.now() - timedelta(hours=i) for i in range(10)],
+                    'Coin': np.random.choice(['BTC', 'ETH', 'ADA', 'SOL'], 10),
+                    'Amount': np.random.uniform(1000000, 50000000, 10),
+                    'From Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
+                    'To Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
+                    'Type': np.random.choice(['Deposit', 'Withdrawal', 'Transfer'], 10)
+                }
+                whale_df = pd.DataFrame(whale_data)
+                whale_df['Amount'] = whale_df['Amount'].round(0)
+    else:
+        # Fallback to mock data
+        whale_data = {
+            'Timestamp': [datetime.now() - timedelta(hours=i) for i in range(10)],
+            'Coin': np.random.choice(['BTC', 'ETH', 'ADA', 'SOL'], 10),
+            'Amount': np.random.uniform(1000000, 50000000, 10),
+            'From Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
+            'To Exchange': np.random.choice(['Unknown', 'Binance', 'Coinbase', 'Kraken'], 10),
+            'Type': np.random.choice(['Deposit', 'Withdrawal', 'Transfer'], 10)
+        }
+        whale_df = pd.DataFrame(whale_data)
+        whale_df['Amount'] = whale_df['Amount'].round(0)
     
     st.dataframe(
         whale_df,
@@ -456,13 +657,21 @@ elif page == "🐋 Whale Tracker":
     fig.update_layout(title="Daily Whale Activity Volume", xaxis_title="Date", yaxis_title="Volume ($)")
     st.plotly_chart(fig, use_container_width=True)
 
-# Footer
+# Footer with API status
 st.markdown("---")
+
+# API Status indicator
+if api_available:
+    st.success("🟢 **Real-time Data Enabled** - Connected to CoinGecko API for live cryptocurrency data")
+    st.info("📊 **Data Sources**: CoinGecko (prices, market data), DeFi protocols, trending coins")
+else:
+    st.warning("🟡 **Fallback Mode** - Using simulated data (API integration not available)")
+
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
     <p>🚀 Crypto Trend Analyzer | Enterprise-Grade Analytics Platform</p>
-    <p><small>Powered by Advanced AI & Machine Learning | Real-time Market Analysis</small></p>
-    <p><small>⚠️ This is a demo application with simulated data for educational purposes</small></p>
+    <p><small>Powered by Free APIs: CoinGecko, CryptoCompare, Messari | Real-time Market Analysis</small></p>
+    <p><small>⚠️ Educational and demo purposes - Not financial advice</small></p>
 </div>
 """, unsafe_allow_html=True)
 
