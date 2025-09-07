@@ -8,37 +8,47 @@ import asyncio
 import json
 from typing import Dict, List, Any
 
-# Import simplified API integrations to avoid rate limiting
+# Import Multi-API system with intelligent failover
 try:
-    from simple_crypto_api import (
-        get_live_prices,
-        get_global_market_data,
-        get_price_history,
-        get_trending_coins,
-        convert_to_dataframe
+    from multi_api_crypto import (
+        get_multi_api_prices,
+        get_multi_api_historical,
+        get_api_status_info
     )
     api_available = True
-    st.success("🟢 **Simplified API Mode** - Optimized for rate limits")
-except ImportError as e:
-    st.warning(f"Simplified API not available: {e}")
-    api_available = False
-
-# Fallback to full API if needed
-if not api_available:
+    api_mode = "multi"
+    st.success("🚀 **Multi-API Mode** - 5 backup APIs available!")
+except ImportError:
+    # Fallback to simplified API
     try:
-        from api_integrations import (
-            get_real_time_prices,
-            get_historical_price_data, 
-            get_defi_yield_data,
-            get_market_overview,
-            get_trending_cryptocurrencies,
-            get_whale_activity
+        from simple_crypto_api import (
+            get_live_prices,
+            get_global_market_data,
+            get_price_history,
+            get_trending_coins,
+            convert_to_dataframe
         )
         api_available = True
-        st.info("🟡 **Full API Mode** - May hit rate limits")
-    except ImportError as e:
-        st.error(f"No API integrations available: {e}")
-        api_available = False
+        api_mode = "simple"
+        st.info("🟢 **Simplified API Mode** - Single API with caching")
+    except ImportError:
+        # Final fallback to full API
+        try:
+            from api_integrations import (
+                get_real_time_prices,
+                get_historical_price_data, 
+                get_defi_yield_data,
+                get_market_overview,
+                get_trending_cryptocurrencies,
+                get_whale_activity
+            )
+            api_available = True
+            api_mode = "full"
+            st.warning("🟡 **Full API Mode** - May encounter rate limits")
+        except ImportError as e:
+            st.error(f"❌ No API integrations available: {e}")
+            api_available = False
+            api_mode = "none"
 
 # Import our modules (with error handling for Streamlit deployment)
 try:
@@ -123,6 +133,21 @@ auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=True)
 if auto_refresh:
     refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
     st.sidebar.info(f"Data refreshes every {refresh_interval} seconds")
+
+# API Status Dashboard
+if api_available and api_mode == "multi":
+    with st.sidebar.expander("📡 API Status Dashboard"):
+        try:
+            api_status = get_api_status_info()
+            for api_name, status in api_status.items():
+                st.write(f"**{api_name.title()}** {status['status']}")
+                if status['failures'] > 0:
+                    st.write(f"  ⚠️ Failures: {status['failures']}")
+        except Exception as e:
+            st.write("Status unavailable")
+            
+    st.sidebar.markdown("---")
+    st.sidebar.info("💡 **Multi-API Features:**\n- Automatic failover\n- 5 backup data sources\n- Smart rate limiting\n- Error recovery")
 
 # Mock data generation functions
 def get_price_data(symbol: str, days: int = 30) -> pd.DataFrame:
@@ -229,25 +254,61 @@ if page == "📊 Overview":
     # Key metrics with real market data
     col1, col2, col3, col4 = st.columns(4)
     
-    if api_available and 'get_global_market_data' in globals():
+    if api_available:
         try:
-            global_data = get_global_market_data()
-            
-            with col1:
-                market_cap = global_data.get('total_market_cap', {}).get('usd', 2000000000000)
-                st.metric("Total Market Cap", f"${market_cap/1e12:.1f}T", "💰")
-            
-            with col2:
-                volume_24h = global_data.get('total_volume', {}).get('usd', 50000000000)
-                st.metric("24h Volume", f"${volume_24h/1e9:.1f}B", "📊")
-            
-            with col3:
-                btc_dominance = global_data.get('market_cap_percentage', {}).get('btc', 45)
-                st.metric("BTC Dominance", f"{btc_dominance:.1f}%", "₿")
-            
-            with col4:
-                active_cryptos = global_data.get('active_cryptocurrencies', 10000)
-                st.metric("Active Cryptos", f"{active_cryptos:,}", "🪙")
+            if api_mode == "multi":
+                # Get aggregated market data from multi-API prices
+                prices = get_multi_api_prices(['BTC', 'ETH', 'ADA', 'SOL'])
+                total_market_cap = sum([p.get('market_cap', 0) for p in prices.values() if p.get('market_cap')])
+                
+                with col1:
+                    st.metric("Major Coins Cap", f"${total_market_cap/1e12:.1f}T", "💰")
+                
+                with col2:
+                    avg_change = np.mean([p.get('change_24h', 0) for p in prices.values()])
+                    st.metric("Avg 24h Change", f"{avg_change:.2f}%", "📊")
+                
+                with col3:
+                    btc_price = prices.get('BTC', {}).get('price', 0)
+                    eth_price = prices.get('ETH', {}).get('price', 0)
+                    if btc_price and eth_price:
+                        btc_dominance = (btc_price * 19000000) / (btc_price * 19000000 + eth_price * 120000000) * 100
+                        st.metric("Est. BTC Dominance", f"{btc_dominance:.1f}%", "₿")
+                    else:
+                        st.metric("BTC Dominance", "45%", "₿")
+                
+                with col4:
+                    active_apis = len([1 for s in get_api_status_info().values() if s['active']])
+                    st.metric("Active APIs", f"{active_apis}/5", "🔗")
+                    
+            elif api_mode == "simple" and 'get_global_market_data' in globals():
+                global_data = get_global_market_data()
+                
+                with col1:
+                    market_cap = global_data.get('total_market_cap', {}).get('usd', 2000000000000)
+                    st.metric("Total Market Cap", f"${market_cap/1e12:.1f}T", "💰")
+                
+                with col2:
+                    volume_24h = global_data.get('total_volume', {}).get('usd', 50000000000)
+                    st.metric("24h Volume", f"${volume_24h/1e9:.1f}B", "📊")
+                
+                with col3:
+                    btc_dominance = global_data.get('market_cap_percentage', {}).get('btc', 45)
+                    st.metric("BTC Dominance", f"{btc_dominance:.1f}%", "₿")
+                
+                with col4:
+                    active_cryptos = global_data.get('active_cryptocurrencies', 10000)
+                    st.metric("Active Cryptos", f"{active_cryptos:,}", "🪙")
+            else:
+                # Fallback metrics
+                with col1:
+                    st.metric("Portfolio Value", "$300K", "💰")
+                with col2:
+                    st.metric("Daily P&L", "+$1,200", "📊")
+                with col3:
+                    st.metric("Market Sentiment", "75/100", "📈")
+                with col4:
+                    st.metric("Active Alerts", "3", "🔔")
                 
         except Exception as e:
             st.warning(f"Error loading market data: {str(e)}")
@@ -291,85 +352,133 @@ if page == "📊 Overview":
     with col1:
         st.subheader("BTC/USD Price Chart (7 Days)")
         with st.spinner("Loading BTC data..."):
-            if api_available and 'get_price_history' in globals():
-                try:
+            try:
+                if api_mode == "multi":
+                    btc_data = get_multi_api_historical('BTC', 7)
+                elif api_mode == "simple" and 'get_price_history' in globals():
                     btc_history = get_price_history('bitcoin', 7)
                     btc_data = convert_to_dataframe(btc_history, 'bitcoin')
-                except Exception as e:
-                    st.warning(f"API error: {e}")
-                    btc_data = convert_to_dataframe([], 'bitcoin')
-            else:
-                btc_data = convert_to_dataframe([], 'bitcoin')
-                
-            fig = go.Figure(data=go.Candlestick(
-                x=btc_data['Date'],
-                open=btc_data['Open'],
-                high=btc_data['High'],
-                low=btc_data['Low'],
-                close=btc_data['Close']
-            ))
-            fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="BTC Price (7 Days)")
-            st.plotly_chart(fig, use_container_width=True)
+                else:
+                    btc_data = generate_fallback_price_data('BTC', 7)
+                    
+                fig = go.Figure(data=go.Candlestick(
+                    x=btc_data['Date'],
+                    open=btc_data['Open'],
+                    high=btc_data['High'],
+                    low=btc_data['Low'],
+                    close=btc_data['Close']
+                ))
+                fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="BTC Price (7 Days)")
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Chart error: {e}")
+                st.info("📊 Chart temporarily unavailable")
     
     with col2:
         st.subheader("ETH/USD Price Chart (7 Days)")
         with st.spinner("Loading ETH data..."):
-            if api_available and 'get_price_history' in globals():
-                try:
+            try:
+                if api_mode == "multi":
+                    eth_data = get_multi_api_historical('ETH', 7)
+                elif api_mode == "simple" and 'get_price_history' in globals():
                     eth_history = get_price_history('ethereum', 7)
                     eth_data = convert_to_dataframe(eth_history, 'ethereum')
-                except Exception as e:
-                    st.warning(f"API error: {e}")
-                    eth_data = convert_to_dataframe([], 'ethereum')
-            else:
-                eth_data = convert_to_dataframe([], 'ethereum')
-                
-            fig = go.Figure(data=go.Candlestick(
-                x=eth_data['Date'],
-                open=eth_data['Open'],
-                high=eth_data['High'],
-                low=eth_data['Low'],
-                close=eth_data['Close']
-            ))
-            fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="ETH Price (7 Days)")
-            st.plotly_chart(fig, use_container_width=True)
+                else:
+                    eth_data = generate_fallback_price_data('ETH', 7)
+                    
+                fig = go.Figure(data=go.Candlestick(
+                    x=eth_data['Date'],
+                    open=eth_data['Open'],
+                    high=eth_data['High'],
+                    low=eth_data['Low'],
+                    close=eth_data['Close']
+                ))
+                fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="ETH Price (7 Days)")
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Chart error: {e}")
+                st.info("📊 Chart temporarily unavailable")
     
     # Current prices with real data
     st.subheader("Live Market Data")
     
-    if api_available and 'get_live_prices' in globals():
+    if api_available:
         with st.spinner("Loading live prices..."):
             try:
-                prices = get_live_prices()
-                price_col1, price_col2, price_col3, price_col4 = st.columns(4)
-                
-                with price_col1:
-                    btc_data = prices.get('bitcoin', {})
-                    price = btc_data.get('usd', 45000)
-                    change = btc_data.get('usd_24h_change', 0)
-                    change_color = "🟢" if change >= 0 else "🔴"
-                    st.metric("BTC", f"${price:,.0f}", f"{change_color} {change:.2f}%")
-                
-                with price_col2:
-                    eth_data = prices.get('ethereum', {})
-                    price = eth_data.get('usd', 2500)
-                    change = eth_data.get('usd_24h_change', 0)
-                    change_color = "🟢" if change >= 0 else "🔴"
-                    st.metric("ETH", f"${price:,.0f}", f"{change_color} {change:.2f}%")
-                
-                with price_col3:
-                    ada_data = prices.get('cardano', {})
-                    price = ada_data.get('usd', 0.5)
-                    change = ada_data.get('usd_24h_change', 0)
-                    change_color = "🟢" if change >= 0 else "🔴"
-                    st.metric("ADA", f"${price:.4f}", f"{change_color} {change:.2f}%")
-                
-                with price_col4:
-                    sol_data = prices.get('solana', {})
-                    price = sol_data.get('usd', 100)
-                    change = sol_data.get('usd_24h_change', 0)
-                    change_color = "🟢" if change >= 0 else "🔴"
-                    st.metric("SOL", f"${price:.2f}", f"{change_color} {change:.2f}%")
+                if api_mode == "multi":
+                    prices = get_multi_api_prices(['BTC', 'ETH', 'ADA', 'SOL'])
+                    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+                    
+                    with price_col1:
+                        btc_data = prices.get('BTC', {})
+                        price = btc_data.get('price', 45000)
+                        change = btc_data.get('change_24h', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("BTC", f"${price:,.0f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col2:
+                        eth_data = prices.get('ETH', {})
+                        price = eth_data.get('price', 2500)
+                        change = eth_data.get('change_24h', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("ETH", f"${price:,.0f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col3:
+                        ada_data = prices.get('ADA', {})
+                        price = ada_data.get('price', 0.5)
+                        change = ada_data.get('change_24h', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("ADA", f"${price:.4f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col4:
+                        sol_data = prices.get('SOL', {})
+                        price = sol_data.get('price', 100)
+                        change = sol_data.get('change_24h', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("SOL", f"${price:.2f}", f"{change_color} {change:.2f}%")
+                        
+                elif api_mode == "simple" and 'get_live_prices' in globals():
+                    prices = get_live_prices()
+                    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+                    
+                    with price_col1:
+                        btc_data = prices.get('bitcoin', {})
+                        price = btc_data.get('usd', 45000)
+                        change = btc_data.get('usd_24h_change', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("BTC", f"${price:,.0f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col2:
+                        eth_data = prices.get('ethereum', {})
+                        price = eth_data.get('usd', 2500)
+                        change = eth_data.get('usd_24h_change', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("ETH", f"${price:,.0f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col3:
+                        ada_data = prices.get('cardano', {})
+                        price = ada_data.get('usd', 0.5)
+                        change = ada_data.get('usd_24h_change', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("ADA", f"${price:.4f}", f"{change_color} {change:.2f}%")
+                    
+                    with price_col4:
+                        sol_data = prices.get('solana', {})
+                        price = sol_data.get('usd', 100)
+                        change = sol_data.get('usd_24h_change', 0)
+                        change_color = "🟢" if change >= 0 else "🔴"
+                        st.metric("SOL", f"${price:.2f}", f"{change_color} {change:.2f}%")
+                else:
+                    # Show fallback prices
+                    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+                    with price_col1:
+                        st.metric("BTC", "$45,000", "🟢 +2.3%")
+                    with price_col2:
+                        st.metric("ETH", "$2,500", "🔴 -1.2%")
+                    with price_col3:
+                        st.metric("ADA", "$0.50", "🟢 +0.8%")
+                    with price_col4:
+                        st.metric("SOL", "$100", "🟢 +3.1%")
                     
             except Exception as e:
                 st.error(f"Error loading live prices: {str(e)}")
@@ -706,20 +815,44 @@ elif page == "🐋 Whale Tracker":
     fig.update_layout(title="Daily Whale Activity Volume", xaxis_title="Date", yaxis_title="Volume ($)")
     st.plotly_chart(fig, use_container_width=True)
 
-# Footer with API status
+# Footer with Multi-API status
 st.markdown("---")
 
-# API Status indicator
-if api_available:
-    st.success("🟢 **Real-time Data Enabled** - Connected to CoinGecko API for live cryptocurrency data")
-    st.info("📊 **Data Sources**: CoinGecko (prices, market data), DeFi protocols, trending coins")
+# Enhanced API Status indicator
+if api_available and api_mode == "multi":
+    col1, col2 = st.columns(2)
+    with col1:
+        st.success("🚀 **Multi-API Mode Active** - Maximum reliability with 5 backup data sources!")
+        try:
+            api_status = get_api_status_info()
+            active_count = len([1 for s in api_status.values() if s['active']])
+            st.info(f"📡 **{active_count}/5 APIs Active**: Intelligent failover ensures continuous data")
+        except:
+            st.info("📡 **Multi-API System**: CoinGecko → CoinCap → CryptoCompare → Coinbase → Yahoo")
+    
+    with col2:
+        st.markdown("### 🔄 **Backup APIs Available:**")
+        st.markdown("1. 🥇 **CoinGecko** (Primary)")
+        st.markdown("2. 🥈 **CoinCap** (Backup #1)")  
+        st.markdown("3. 🥉 **CryptoCompare** (Backup #2)")
+        st.markdown("4. 🏦 **Coinbase** (Backup #3)")
+        st.markdown("5. 📈 **Yahoo Finance** (Backup #4)")
+
+elif api_available and api_mode == "simple":
+    st.success("🟢 **Simplified API Mode** - Optimized for rate limits with smart caching")
+    st.info("📊 **Data Source**: CoinGecko API with aggressive caching and rate limiting")
+
+elif api_available and api_mode == "full":
+    st.warning("🟡 **Full API Mode** - Enhanced features but may encounter rate limits")
+    st.info("📊 **Data Sources**: Multiple APIs with advanced features")
+
 else:
-    st.warning("🟡 **Fallback Mode** - Using simulated data (API integration not available)")
+    st.error("🔴 **Fallback Mode** - Using simulated data (API integration not available)")
 
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
-    <p>🚀 Crypto Trend Analyzer | Enterprise-Grade Analytics Platform</p>
-    <p><small>Powered by Free APIs: CoinGecko, CryptoCompare, Messari | Real-time Market Analysis</small></p>
+    <p>🚀 Crypto Trend Analyzer | Enterprise-Grade Multi-API Platform</p>
+    <p><small>Powered by 5 Free APIs with Intelligent Failover | Real-time Market Analysis</small></p>
     <p><small>⚠️ Educational and demo purposes - Not financial advice</small></p>
 </div>
 """, unsafe_allow_html=True)
