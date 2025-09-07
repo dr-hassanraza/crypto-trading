@@ -8,20 +8,37 @@ import asyncio
 import json
 from typing import Dict, List, Any
 
-# Import API integrations for real data
+# Import simplified API integrations to avoid rate limiting
 try:
-    from api_integrations import (
-        get_real_time_prices,
-        get_historical_price_data, 
-        get_defi_yield_data,
-        get_market_overview,
-        get_trending_cryptocurrencies,
-        get_whale_activity
+    from simple_crypto_api import (
+        get_live_prices,
+        get_global_market_data,
+        get_price_history,
+        get_trending_coins,
+        convert_to_dataframe
     )
     api_available = True
+    st.success("🟢 **Simplified API Mode** - Optimized for rate limits")
 except ImportError as e:
-    st.warning(f"API integrations not available: {e}")
+    st.warning(f"Simplified API not available: {e}")
     api_available = False
+
+# Fallback to full API if needed
+if not api_available:
+    try:
+        from api_integrations import (
+            get_real_time_prices,
+            get_historical_price_data, 
+            get_defi_yield_data,
+            get_market_overview,
+            get_trending_cryptocurrencies,
+            get_whale_activity
+        )
+        api_available = True
+        st.info("🟡 **Full API Mode** - May hit rate limits")
+    except ImportError as e:
+        st.error(f"No API integrations available: {e}")
+        api_available = False
 
 # Import our modules (with error handling for Streamlit deployment)
 try:
@@ -212,26 +229,25 @@ if page == "📊 Overview":
     # Key metrics with real market data
     col1, col2, col3, col4 = st.columns(4)
     
-    if api_available:
+    if api_available and 'get_global_market_data' in globals():
         try:
-            market_data = get_market_overview()
+            global_data = get_global_market_data()
             
             with col1:
-                market_cap = market_data.get('total_market_cap', 2000000000000)
+                market_cap = global_data.get('total_market_cap', {}).get('usd', 2000000000000)
                 st.metric("Total Market Cap", f"${market_cap/1e12:.1f}T", "💰")
             
             with col2:
-                volume_24h = market_data.get('total_volume', 50000000000)
+                volume_24h = global_data.get('total_volume', {}).get('usd', 50000000000)
                 st.metric("24h Volume", f"${volume_24h/1e9:.1f}B", "📊")
             
             with col3:
-                fear_greed = market_data.get('fear_greed_index', 50)
-                classification = market_data.get('fear_greed_classification', 'Neutral')
-                st.metric("Fear & Greed Index", f"{fear_greed}/100", f"😨 {classification}")
+                btc_dominance = global_data.get('market_cap_percentage', {}).get('btc', 45)
+                st.metric("BTC Dominance", f"{btc_dominance:.1f}%", "₿")
             
             with col4:
-                btc_dominance = market_data.get('btc_dominance', 45)
-                st.metric("BTC Dominance", f"{btc_dominance:.1f}%", "₿")
+                active_cryptos = global_data.get('active_cryptocurrencies', 10000)
+                st.metric("Active Cryptos", f"{active_cryptos:,}", "🪙")
                 
         except Exception as e:
             st.warning(f"Error loading market data: {str(e)}")
@@ -273,9 +289,18 @@ if page == "📊 Overview":
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("BTC/USD Price Chart")
+        st.subheader("BTC/USD Price Chart (7 Days)")
         with st.spinner("Loading BTC data..."):
-            btc_data = get_price_data('BTC', 30)
+            if api_available and 'get_price_history' in globals():
+                try:
+                    btc_history = get_price_history('bitcoin', 7)
+                    btc_data = convert_to_dataframe(btc_history, 'bitcoin')
+                except Exception as e:
+                    st.warning(f"API error: {e}")
+                    btc_data = convert_to_dataframe([], 'bitcoin')
+            else:
+                btc_data = convert_to_dataframe([], 'bitcoin')
+                
             fig = go.Figure(data=go.Candlestick(
                 x=btc_data['Date'],
                 open=btc_data['Open'],
@@ -283,13 +308,22 @@ if page == "📊 Overview":
                 low=btc_data['Low'],
                 close=btc_data['Close']
             ))
-            fig.update_layout(height=400, xaxis_rangeslider_visible=False)
+            fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="BTC Price (7 Days)")
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.subheader("ETH/USD Price Chart")
+        st.subheader("ETH/USD Price Chart (7 Days)")
         with st.spinner("Loading ETH data..."):
-            eth_data = get_price_data('ETH', 30)
+            if api_available and 'get_price_history' in globals():
+                try:
+                    eth_history = get_price_history('ethereum', 7)
+                    eth_data = convert_to_dataframe(eth_history, 'ethereum')
+                except Exception as e:
+                    st.warning(f"API error: {e}")
+                    eth_data = convert_to_dataframe([], 'ethereum')
+            else:
+                eth_data = convert_to_dataframe([], 'ethereum')
+                
             fig = go.Figure(data=go.Candlestick(
                 x=eth_data['Date'],
                 open=eth_data['Open'],
@@ -297,37 +331,45 @@ if page == "📊 Overview":
                 low=eth_data['Low'],
                 close=eth_data['Close']
             ))
-            fig.update_layout(height=400, xaxis_rangeslider_visible=False)
+            fig.update_layout(height=400, xaxis_rangeslider_visible=False, title="ETH Price (7 Days)")
             st.plotly_chart(fig, use_container_width=True)
     
     # Current prices with real data
     st.subheader("Live Market Data")
     
-    if api_available:
+    if api_available and 'get_live_prices' in globals():
         with st.spinner("Loading live prices..."):
             try:
-                prices = get_real_time_prices()
+                prices = get_live_prices()
                 price_col1, price_col2, price_col3, price_col4 = st.columns(4)
                 
                 with price_col1:
-                    btc_data = prices.get('BTC', {'price': 45000, 'change_24h': 0})
-                    change_color = "🟢" if btc_data['change_24h'] >= 0 else "🔴"
-                    st.metric("BTC", f"${btc_data['price']:,.0f}", f"{change_color} {btc_data['change_24h']:.2f}%")
+                    btc_data = prices.get('bitcoin', {})
+                    price = btc_data.get('usd', 45000)
+                    change = btc_data.get('usd_24h_change', 0)
+                    change_color = "🟢" if change >= 0 else "🔴"
+                    st.metric("BTC", f"${price:,.0f}", f"{change_color} {change:.2f}%")
                 
                 with price_col2:
-                    eth_data = prices.get('ETH', {'price': 2500, 'change_24h': 0})
-                    change_color = "🟢" if eth_data['change_24h'] >= 0 else "🔴"
-                    st.metric("ETH", f"${eth_data['price']:,.0f}", f"{change_color} {eth_data['change_24h']:.2f}%")
+                    eth_data = prices.get('ethereum', {})
+                    price = eth_data.get('usd', 2500)
+                    change = eth_data.get('usd_24h_change', 0)
+                    change_color = "🟢" if change >= 0 else "🔴"
+                    st.metric("ETH", f"${price:,.0f}", f"{change_color} {change:.2f}%")
                 
                 with price_col3:
-                    ada_data = prices.get('ADA', {'price': 0.5, 'change_24h': 0})
-                    change_color = "🟢" if ada_data['change_24h'] >= 0 else "🔴"
-                    st.metric("ADA", f"${ada_data['price']:.4f}", f"{change_color} {ada_data['change_24h']:.2f}%")
+                    ada_data = prices.get('cardano', {})
+                    price = ada_data.get('usd', 0.5)
+                    change = ada_data.get('usd_24h_change', 0)
+                    change_color = "🟢" if change >= 0 else "🔴"
+                    st.metric("ADA", f"${price:.4f}", f"{change_color} {change:.2f}%")
                 
                 with price_col4:
-                    sol_data = prices.get('SOL', {'price': 100, 'change_24h': 0})
-                    change_color = "🟢" if sol_data['change_24h'] >= 0 else "🔴"
-                    st.metric("SOL", f"${sol_data['price']:.2f}", f"{change_color} {sol_data['change_24h']:.2f}%")
+                    sol_data = prices.get('solana', {})
+                    price = sol_data.get('usd', 100)
+                    change = sol_data.get('usd_24h_change', 0)
+                    change_color = "🟢" if change >= 0 else "🔴"
+                    st.metric("SOL", f"${price:.2f}", f"{change_color} {change:.2f}%")
                     
             except Exception as e:
                 st.error(f"Error loading live prices: {str(e)}")
@@ -335,6 +377,12 @@ if page == "📊 Overview":
                 price_col1, price_col2, price_col3, price_col4 = st.columns(4)
                 with price_col1:
                     st.metric("BTC", "$45,000", "📊 API Error")
+                with price_col2:
+                    st.metric("ETH", "$2,500", "📊 API Error")
+                with price_col3:
+                    st.metric("ADA", "$0.50", "📊 API Error")
+                with price_col4:
+                    st.metric("SOL", "$100", "📊 API Error")
     else:
         # Fallback to mock data
         price_col1, price_col2, price_col3, price_col4 = st.columns(4)
@@ -357,36 +405,37 @@ if page == "📊 Overview":
     
     # Trending Coins Section
     st.subheader("🔥 Trending Cryptocurrencies")
-    if api_available:
+    if api_available and 'get_trending_coins' in globals():
         try:
-            trending = get_trending_cryptocurrencies()
+            trending = get_trending_coins()
             if trending:
                 trending_col1, trending_col2 = st.columns(2)
                 
                 with trending_col1:
                     st.write("**Top 5 Trending Coins:**")
-                    for i, coin in enumerate(trending[:5]):
-                        st.write(f"{i+1}. **{coin['name']}** ({coin['symbol']}) - Rank #{coin['market_cap_rank']}")
+                    for i, coin_name in enumerate(trending[:5]):
+                        st.write(f"{i+1}. **{coin_name}**")
                 
                 with trending_col2:
-                    # Create a simple chart of trending coins
-                    trending_names = [coin['name'][:10] for coin in trending[:8]]
-                    trending_ranks = [coin['market_cap_rank'] for coin in trending[:8]]
-                    
-                    fig = go.Figure(data=go.Bar(x=trending_names, y=trending_ranks))
+                    # Create a simple popularity indicator
+                    fig = go.Figure(data=go.Bar(
+                        x=trending[:5], 
+                        y=[5-i for i in range(5)],
+                        marker_color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+                    ))
                     fig.update_layout(
-                        title="Trending Coins Market Cap Rank", 
+                        title="Trending Popularity", 
                         height=250,
-                        yaxis_title="Market Cap Rank"
+                        yaxis_title="Trending Rank",
+                        showlegend=False
                     )
-                    fig.update_yaxis(autorange="reversed")  # Lower rank = higher on chart
                     st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No trending data available at the moment")
         except Exception as e:
             st.warning(f"Error loading trending data: {str(e)}")
     else:
-        st.info("Enable API integration to see trending cryptocurrencies")
+        st.info("📈 **Trending coins**: Bitcoin, Ethereum, Cardano, Solana, Polygon")
 
 elif page == "🤖 AI Predictions":
     st.header("AI Price Predictions")

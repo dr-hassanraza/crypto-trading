@@ -33,38 +33,114 @@ class CryptoAPIManager:
             'defipulse': 'https://data-api.defipulse.com/api/v1'
         }
         self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'CryptoAnalyzer/1.0'})
+        self.session.headers.update({
+            'User-Agent': 'CryptoAnalyzer/1.0',
+            'Accept': 'application/json'
+        })
         
-        # Rate limiting
+        # Enhanced rate limiting for CoinGecko free tier (10-50 requests/minute)
         self.last_request_time = {}
-        self.min_request_interval = 1.0  # 1 second between requests
+        self.request_counts = {}
+        self.min_request_interval = {
+            'coingecko': 2.0,  # 2 seconds between CoinGecko requests
+            'cryptocompare': 1.0,
+            'messari': 1.0,
+            'defipulse': 1.0
+        }
+        
+        # Circuit breaker for rate limit handling
+        self.circuit_breaker = {
+            'coingecko': {'failures': 0, 'last_failure': None, 'is_open': False}
+        }
+    
+    def _check_circuit_breaker(self, api_name: str) -> bool:
+        """Check if circuit breaker is open for this API."""
+        if api_name not in self.circuit_breaker:
+            return False
+            
+        breaker = self.circuit_breaker[api_name]
+        if breaker['is_open']:
+            # Check if we should try again (30 seconds cooldown)
+            if breaker['last_failure'] and time.time() - breaker['last_failure'] > 30:
+                breaker['is_open'] = False
+                breaker['failures'] = 0
+                return False
+            return True
+        return False
+    
+    def _handle_api_failure(self, api_name: str, status_code: int = None):
+        """Handle API failure and update circuit breaker."""
+        if api_name not in self.circuit_breaker:
+            return
+            
+        breaker = self.circuit_breaker[api_name]
+        breaker['failures'] += 1
+        breaker['last_failure'] = time.time()
+        
+        # Open circuit breaker after 3 failures or rate limit
+        if breaker['failures'] >= 3 or status_code == 429:
+            breaker['is_open'] = True
+            st.warning(f"⚠️ {api_name.title()} API temporarily unavailable - switching to fallback data")
     
     def _rate_limit(self, api_name: str):
-        """Simple rate limiting to avoid API abuse."""
+        """Enhanced rate limiting with per-API intervals."""
         current_time = time.time()
+        interval = self.min_request_interval.get(api_name, 1.0)
+        
         if api_name in self.last_request_time:
             time_diff = current_time - self.last_request_time[api_name]
-            if time_diff < self.min_request_interval:
-                time.sleep(self.min_request_interval - time_diff)
+            if time_diff < interval:
+                sleep_time = interval - time_diff
+                st.info(f"⏳ Rate limiting - waiting {sleep_time:.1f}s for {api_name}")
+                time.sleep(sleep_time)
+        
         self.last_request_time[api_name] = time.time()
     
     def _make_request(self, api_name: str, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """Make API request with error handling."""
+        """Make API request with enhanced error handling and circuit breaker."""
+        # Check circuit breaker first
+        if self._check_circuit_breaker(api_name):
+            return None
+        
         self._rate_limit(api_name)
         
         try:
             url = f"{self.base_urls[api_name]}/{endpoint}"
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=15)
+            
+            if response.status_code == 429:
+                self._handle_api_failure(api_name, 429)
+                st.error(f"🚫 Rate limit exceeded for {api_name} - please wait before refreshing")
+                return None
+            
             response.raise_for_status()
+            
+            # Reset circuit breaker on success
+            if api_name in self.circuit_breaker:
+                self.circuit_breaker[api_name]['failures'] = 0
+                
             return response.json()
-        except requests.exceptions.RequestException as e:
-            st.warning(f"API request failed for {api_name}: {str(e)}")
+            
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response else None
+            self._handle_api_failure(api_name, status_code)
+            if status_code == 429:
+                st.error(f"🚫 {api_name} rate limit exceeded - using fallback data")
+            else:
+                st.warning(f"HTTP error for {api_name}: {status_code}")
             return None
+            
+        except requests.exceptions.RequestException as e:
+            self._handle_api_failure(api_name)
+            st.warning(f"Network error for {api_name}: {str(e)}")
+            return None
+            
         except Exception as e:
+            self._handle_api_failure(api_name)
             st.warning(f"Error processing {api_name} response: {str(e)}")
             return None
 
-    @st.cache_data(ttl=300)  # Cache for 5 minutes
+    @st.cache_data(ttl=600)  # Cache for 10 minutes to reduce API calls
     def get_current_prices(_self) -> Dict[str, float]:
         """Get current cryptocurrency prices from CoinGecko."""
         params = {
@@ -111,7 +187,7 @@ class CryptoAPIManager:
             'XRP': {'price': 0.6 + np.random.normal(0, 0.05), 'change_24h': np.random.uniform(-5, 5)}
         }
 
-    @st.cache_data(ttl=600)  # Cache for 10 minutes
+    @st.cache_data(ttl=1800)  # Cache for 30 minutes - historical data changes slowly
     def get_historical_data(_self, symbol: str, days: int = 30) -> pd.DataFrame:
         """Get historical price data from CoinGecko."""
         # Map symbols to CoinGecko IDs
@@ -194,7 +270,7 @@ class CryptoAPIManager:
         
         return pd.DataFrame(data)
 
-    @st.cache_data(ttl=900)  # Cache for 15 minutes
+    @st.cache_data(ttl=3600)  # Cache for 1 hour - DeFi data changes slowly
     def get_defi_protocols(_self) -> List[Dict[str, Any]]:
         """Get DeFi protocol data from CoinGecko DeFi API."""
         try:
@@ -250,7 +326,7 @@ class CryptoAPIManager:
         
         return protocols
 
-    @st.cache_data(ttl=1800)  # Cache for 30 minutes
+    @st.cache_data(ttl=3600)  # Cache for 1 hour - trending changes slowly
     def get_trending_coins(_self) -> List[Dict[str, Any]]:
         """Get trending cryptocurrencies from CoinGecko."""
         data = _self._make_request('coingecko', 'search/trending')
@@ -269,7 +345,7 @@ class CryptoAPIManager:
         
         return trending
 
-    @st.cache_data(ttl=3600)  # Cache for 1 hour
+    @st.cache_data(ttl=1800)  # Cache for 30 minutes - market sentiment
     def get_market_sentiment(_self) -> Dict[str, Any]:
         """Get market sentiment indicators."""
         try:
@@ -316,7 +392,7 @@ class CryptoAPIManager:
         else:
             return 'Extreme Greed'
 
-    @st.cache_data(ttl=1800)  # Cache for 30 minutes 
+    @st.cache_data(ttl=900)  # Cache for 15 minutes - whale activity updates more frequently
     def get_whale_transactions(_self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get large cryptocurrency transactions (mock data for free APIs)."""
         # Note: Real whale tracking requires paid APIs like Whale Alert
